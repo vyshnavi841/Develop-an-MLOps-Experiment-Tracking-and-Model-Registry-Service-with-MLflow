@@ -1,0 +1,25 @@
+FROM python:3.10-slim
+
+WORKDIR /mlflow
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
+    mlflow==2.11.3 \
+    psycopg2-binary==2.9.9 \
+    boto3==1.34.69
+
+RUN mkdir -p /mlruns /mlflow
+
+EXPOSE 5000
+
+CMD ["mlflow", "server", \
+     "--backend-store-uri", "postgresql://mlflow_user:mlflow_password@postgres:5432/mlflow_db", \
+     "--default-artifact-root", "/mlruns", \
+     "--host", "0.0.0.0", \
+     "--port", "5000"]

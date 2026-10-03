@@ -1,0 +1,90 @@
+version: "3.8"
+
+services:
+  # -------------------------------------------------------------
+  # PostgreSQL: Relational metadata store for MLflow Tracking Server
+  # -------------------------------------------------------------
+  postgres:
+    image: postgres:13-alpine
+    container_name: mlops_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mlflow_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mlflow_password}
+      POSTGRES_DB: ${POSTGRES_DB:-mlflow_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mlflow_user} -d ${POSTGRES_DB:-mlflow_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - mlops_network
+
+  # -------------------------------------------------------------
+  # MLflow Tracking & Model Registry Server
+  # -------------------------------------------------------------
+  mlflow_server:
+    build:
+      context: .
+      dockerfile: Dockerfile.mlflow
+    container_name: mlops_mlflow_server
+    restart: always
+    environment:
+      MLFLOW_TRACKING_URI: http://0.0.0.0:5000
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlruns_data:/mlruns
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - mlops_network
+
+  # -------------------------------------------------------------
+  # FastAPI Application Gateway (Inference & Experiment Trigger)
+  # -------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: mlops_fastapi_gateway
+    restart: always
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow_server:5000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mlflow_user}:${POSTGRES_PASSWORD:-mlflow_password}@postgres:5432/${POSTGRES_DB:-mlflow_db}
+      REGISTERED_MODEL_NAME: ${REGISTERED_MODEL_NAME:-MNISTClassifier}
+      DEFAULT_MODEL_STAGE: ${DEFAULT_MODEL_STAGE:-Production}
+      API_PORT: 8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - mlruns_data:/mlruns:ro
+    depends_on:
+      mlflow_server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - mlops_network
+
+volumes:
+  postgres_data:
+    driver: local
+  mlruns_data:
+    driver: local
+
+networks:
+  mlops_network:
+    driver: bridge
